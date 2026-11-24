@@ -24,7 +24,9 @@
     <string name="stat_next">Next at</string>
 
     <string name="sound">Sound</string>
-    <string name="sound_detail">Rings 12 s at alarm volume</string>
+    <string name="sound_detail">Rings 12 s at ringtone volume</string>
+    <string name="ring_volume">Ring volume</string>
+    <string name="volume_percent">%1$d%%</string>
     <string name="phone_ringtone">Phone ringtone</string>
     <string name="ringtone_silent">Ringtone is silent · alarm sound used</string>
     <string name="test">Test</string>
@@ -32,8 +34,15 @@
     <string name="vibrate">Vibrate</string>
     <string name="vibrate_subtitle">Buzz along with each ring</string>
 
-    <string name="warn_volume">Alarm volume is off, so the rings will be silent.</string>
-    <string name="warn_volume_action">Turn up</string>
+    <string name="warn_vibrate_buzz">Your phone is on vibrate, so the rings will only buzz.</string>
+    <string name="warn_vibrate_silent">Your phone is on vibrate and Vibrate is off here, so the rings will be silent.</string>
+    <string name="warn_mute_buzz">Your phone is on mute, so the rings will only buzz.</string>
+    <string name="warn_mute_silent">Your phone is on mute, so the rings will be silent.</string>
+    <string name="warn_ringtone_volume_off">Your ringtone volume is off, so the rings will be silent.</string>
+    <string name="warn_dnd">Do Not Disturb is on, so the rings may be silent.</string>
+    <string name="settings">Settings</string>
+    <string name="sound_on">Sound on</string>
+    <string name="turn_up">Turn up</string>
     <string name="warn_notifications">Notifications are off. The timer still works, but you won\'t see the countdown or a Stop button outside the app.</string>
     <string name="warn_exact">Allow \"Alarms &amp; reminders\" so the rings arrive exactly on time.</string>
     <string name="warn_battery">For on-time rings with the screen off, let Ara Timer run without battery restrictions.</string>

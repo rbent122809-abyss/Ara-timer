@@ -6,7 +6,9 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -135,10 +137,34 @@ class TimerScreenTest {
     fun warnings() {
         snap(
             "4_warnings",
-            state(running = false, warnings = listOf(Warning.Volume, Warning.Battery)),
+            state(running = false, warnings = listOf(Warning.PhoneOnVibrate, Warning.Battery)),
         )
-        compose.onNodeWithText("Turn up").assertExists()
+        compose.onNodeWithText("Your phone is on vibrate, so the rings will only buzz.").assertExists()
+        compose.onNodeWithText("Sound on").assertExists()
         compose.onNodeWithText("Not now").assertExists()
+    }
+
+    @Test
+    fun volumeSlider_showsTheLevel_andReportsChanges() {
+        var reported = -1f
+        val actions = TimerActions(
+            onStart = {},
+            onStop = {},
+            onVibrateChange = {},
+            onVolumeChange = { reported = it },
+            onTogglePreview = {},
+            onWarningAction = {},
+            onWarningDismiss = {},
+        )
+        val base = state(running = false)
+        compose.setContent { AraTheme { TimerScreen(base.copy(ringVolume = 0.7f), actions) } }
+
+        compose.onNodeWithText("70%").assertExists()
+        compose.onNodeWithText("Rings 12 s at ringtone volume").assertExists()
+        val slider = compose.onNodeWithContentDescription("Ring volume")
+        slider.assertExists()
+        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(0.3f) }
+        assertEquals(0.3f, reported, 0.0001f)
     }
 
     @Test
@@ -179,6 +205,7 @@ class TimerScreenTest {
             onStart = { starts++ },
             onStop = { stops++ },
             onVibrateChange = {},
+            onVolumeChange = {},
             onTogglePreview = {},
             onWarningAction = {},
             onWarningDismiss = {},

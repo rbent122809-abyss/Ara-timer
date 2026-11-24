@@ -90,6 +90,12 @@ object TimerController {
         TimerRepository.setVibrate(enabled)
     }
 
+    /** Saves the in-app volume; a ring that is playing right now changes volume at once. */
+    fun setRingVolume(volume: Float) {
+        TimerRepository.setRingVolume(volume)
+        TimerService.instance?.applyRingVolume(TimerRepository.ringVolume.value)
+    }
+
     /**
      * A saved session must not be resumed if the phone rebooted since (elapsedRealtime
      * started over) or if the user stopped the app from Android's settings or the

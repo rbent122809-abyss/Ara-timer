@@ -8,6 +8,10 @@ object TimerConfig {
 
     /** How long each ring lasts. The timer is paused for this long. */
     const val RING_DURATION_MS = 12_000L
+
+    /** In-app volume slider range. 1 = as loud as the phone's ringtone volume. */
+    const val MIN_RING_VOLUME = 0.1f
+    const val DEFAULT_RING_VOLUME = 1f
 }
 
 /**

@@ -81,6 +81,11 @@ class TimerService : Service() {
         if (soundingRing == Session.NOT_RINGING) ringWakeLock.releaseSafely()
     }
 
+    /** The in-app volume slider moved: applies to a ring that is playing right now. */
+    fun applyRingVolume(volume: Float) {
+        ringer.setVolume(volume)
+    }
+
     /** Brings sound, schedule and notification in line with the session at this moment. */
     private fun evaluate() {
         val before = TimerRepository.session.value
@@ -95,7 +100,10 @@ class TimerService : Service() {
                 // A ring is starting, or resuming after our process was restarted mid-ring.
                 ringer.stop()
                 ringWakeLock.acquire(TimerConfig.RING_DURATION_MS + WAKE_LOCK_MARGIN_MS)
-                ringer.start(vibrate = TimerRepository.vibrate.value)
+                ringer.start(
+                    vibrate = TimerRepository.vibrate.value,
+                    volume = TimerRepository.ringVolume.value,
+                )
                 if (session.ringStart != before.ringStart) {
                     // A brand-new ring: its 12 seconds count from when the sound actually started.
                     session = session.copy(ringStart = SystemClock.elapsedRealtime())

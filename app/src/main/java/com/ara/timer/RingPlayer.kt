@@ -18,12 +18,15 @@ import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import androidx.annotation.VisibleForTesting
+import kotlin.math.roundToInt
 
 /**
  * Plays the phone's default ringtone, looped, until [stop] is called.
  *
- * It uses the ALARM audio channel, so it is heard even when the phone is set to vibrate
- * or silent, at the phone's alarm volume. Other audio (music) is asked to duck. During a
+ * It plays on the RINGTONE audio channel, exactly like an incoming call: it is as loud
+ * as the phone's ringtone volume, the volume buttons turn it up or down (even while it
+ * is ringing), and it is silent when the phone is on vibrate or mute. On top of that the
+ * app's own volume slider scales it down. Other audio (music) is asked to duck. During a
  * phone or video call the sound is skipped and only the vibration runs.
  */
 class RingPlayer(context: Context) {
@@ -38,7 +41,16 @@ class RingPlayer(context: Context) {
     private var vibrator: Vibrator? = null
     private var modeListener: AudioManager.OnModeChangedListener? = null
 
+    /** Linear gain applied to the sound, from the in-app volume slider. */
+    private var gain = 1f
+
     private val attributes: AudioAttributes = AudioAttributes.Builder()
+        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        .build()
+
+    /** For vibration only: alarm usage, so the in-app Vibrate switch works in every mode. */
+    private val vibrationAttributes: AudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ALARM)
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
@@ -56,11 +68,23 @@ class RingPlayer(context: Context) {
     @VisibleForTesting
     internal val isLooping: Boolean get() = player?.isLooping == true
 
-    fun start(vibrate: Boolean) {
+    @VisibleForTesting
+    internal val mediaPlayer: MediaPlayer? get() = player
+
+    /**
+     * @param vibrate buzz along with the sound
+     * @param volume the in-app volume slider, [TimerConfig.MIN_RING_VOLUME]..1
+     */
+    fun start(vibrate: Boolean, volume: Float) {
         stop()
+        gain = gainFor(volume)
         try {
             if (isInCall()) {
                 Log.i(TAG, "Call in progress: this ring vibrates only")
+            } else if (!ringtoneAudible()) {
+                // Phone on vibrate/mute or ringtone volume at 0: the system would mute the
+                // sound anyway, so don't play it (and don't make music duck for nothing).
+                Log.i(TAG, "Ringtone muted on this phone: this ring vibrates only")
             } else {
                 // Best effort only. Android 15+ may refuse focus to apps that are not on
                 // screen; the ring must play regardless, so the result is not checked.
@@ -82,6 +106,16 @@ class RingPlayer(context: Context) {
         abandonFocus()
     }
 
+    /** Applies a new in-app volume, also to a sound that is playing right now. */
+    fun setVolume(volume: Float) {
+        gain = gainFor(volume)
+        try {
+            player?.setVolume(gain, gain)
+        } catch (e: IllegalStateException) {
+            // Player already released.
+        }
+    }
+
     private fun stopSound() {
         player?.let { mp ->
             try {
@@ -101,6 +135,12 @@ class RingPlayer(context: Context) {
             generator.release()
         }
         tone = null
+    }
+
+    private fun ringtoneAudible(): Boolean {
+        val manager = audioManager ?: return true
+        return manager.ringerMode == AudioManager.RINGER_MODE_NORMAL &&
+            manager.getStreamVolume(AudioManager.STREAM_RING) > 0
     }
 
     /** Phone call, video/VoIP call, or an incoming call ringing. */
@@ -128,6 +168,7 @@ class RingPlayer(context: Context) {
                     true
                 }
                 mp.prepare()
+                mp.setVolume(gain, gain)
                 mp.start()
                 player = mp
                 return true
@@ -161,10 +202,11 @@ class RingPlayer(context: Context) {
         null
     }
 
-    /** Last resort if no ringtone file can be played: a repeating alarm beep. */
+    /** Last resort if no ringtone file can be played: a repeating beep, on the ringtone channel too. */
     private fun startBeeps() {
         val generator = try {
-            ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME)
+            val percent = (gain * ToneGenerator.MAX_VOLUME).roundToInt().coerceIn(1, ToneGenerator.MAX_VOLUME)
+            ToneGenerator(AudioManager.STREAM_RING, percent)
         } catch (e: RuntimeException) {
             Log.w(TAG, "No tone generator available", e)
             return
@@ -251,7 +293,7 @@ class RingPlayer(context: Context) {
                 device.vibrate(pattern, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
             } else {
                 @Suppress("DEPRECATION")
-                device.vibrate(pattern, attributes)
+                device.vibrate(pattern, vibrationAttributes)
             }
             vibrator = device
         } catch (e: RuntimeException) {
@@ -269,9 +311,18 @@ class RingPlayer(context: Context) {
         }
     }
 
-    private companion object {
-        const val TAG = "AraRingPlayer"
-        const val BEEP_MS = 400
-        const val BEEP_PERIOD_MS = 900L
+    companion object {
+        private const val TAG = "AraRingPlayer"
+        private const val BEEP_MS = 400
+        private const val BEEP_PERIOD_MS = 900L
+
+        /**
+         * Slider position to amplitude. Squared, because loudness is perceived roughly
+         * logarithmically: 50% on the slider sounds about half as loud.
+         */
+        fun gainFor(volume: Float): Float {
+            val level = volume.coerceIn(0f, 1f)
+            return level * level
+        }
     }
 }

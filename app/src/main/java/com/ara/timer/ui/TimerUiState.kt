@@ -4,7 +4,9 @@ import com.ara.timer.Session
 import com.ara.timer.TimeFormat
 import com.ara.timer.TimerConfig
 
-enum class Warning { Volume, Notifications, ExactAlarms, Battery }
+enum class Warning {
+    PhoneOnVibrate, PhoneOnMute, RingtoneVolumeOff, DoNotDisturb, Notifications, ExactAlarms, Battery,
+}
 
 data class TimerUiState(
     val running: Boolean,
@@ -20,6 +22,8 @@ data class TimerUiState(
     /** Clock time of the next ring, or null when idle. */
     val nextAtText: String?,
     val ringtoneText: String,
+    /** In-app volume slider, [TimerConfig.MIN_RING_VOLUME]..1. */
+    val ringVolume: Float,
     val vibrate: Boolean,
     val previewing: Boolean,
     val warnings: List<Warning>,
@@ -36,6 +40,7 @@ data class TimerUiState(
             wallClockOffset: Long,
             formatClock: (Long) -> String,
             ringtoneText: String,
+            ringVolume: Float = TimerConfig.DEFAULT_RING_VOLUME,
             vibrate: Boolean,
             previewing: Boolean,
             warnings: List<Warning>,
@@ -51,6 +56,7 @@ data class TimerUiState(
                     ringCount = 0,
                     nextAtText = null,
                     ringtoneText = ringtoneText,
+                    ringVolume = ringVolume,
                     vibrate = vibrate,
                     previewing = previewing,
                     warnings = warnings,
@@ -68,6 +74,7 @@ data class TimerUiState(
                 ringCount = shown.rings,
                 nextAtText = formatClock(shown.nextRingDue + wallClockOffset),
                 ringtoneText = ringtoneText,
+                ringVolume = ringVolume,
                 vibrate = vibrate,
                 previewing = previewing,
                 warnings = warnings,
@@ -80,11 +87,12 @@ class TimerActions(
     val onStart: () -> Unit,
     val onStop: () -> Unit,
     val onVibrateChange: (Boolean) -> Unit,
+    val onVolumeChange: (Float) -> Unit,
     val onTogglePreview: () -> Unit,
     val onWarningAction: (Warning) -> Unit,
     val onWarningDismiss: (Warning) -> Unit,
 ) {
     companion object {
-        val NoOp = TimerActions({}, {}, {}, {}, {}, {})
+        val NoOp = TimerActions({}, {}, {}, {}, {}, {}, {})
     }
 }

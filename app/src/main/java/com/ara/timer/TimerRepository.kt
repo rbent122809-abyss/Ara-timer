@@ -25,6 +25,7 @@ object TimerRepository {
 
     // Settings.
     private const val KEY_VIBRATE = "vibrate"
+    private const val KEY_RING_VOLUME = "ring_volume"
     private const val KEY_NOTIFICATION_ASKED = "notification_permission_asked"
     private const val KEY_BATTERY_TIP_DISMISSED = "battery_tip_dismissed"
 
@@ -41,6 +42,10 @@ object TimerRepository {
     private val _vibrate = MutableStateFlow(true)
     val vibrate: StateFlow<Boolean> = _vibrate.asStateFlow()
 
+    /** In-app volume slider, [TimerConfig.MIN_RING_VOLUME]..1. */
+    private val _ringVolume = MutableStateFlow(TimerConfig.DEFAULT_RING_VOLUME)
+    val ringVolume: StateFlow<Float> = _ringVolume.asStateFlow()
+
     private val _batteryTipDismissed = MutableStateFlow(false)
     val batteryTipDismissed: StateFlow<Boolean> = _batteryTipDismissed.asStateFlow()
 
@@ -53,6 +58,7 @@ object TimerRepository {
         }
         _session.value = readSession()
         _vibrate.value = prefs.getBoolean(KEY_VIBRATE, true)
+        _ringVolume.value = clampVolume(prefs.getFloat(KEY_RING_VOLUME, TimerConfig.DEFAULT_RING_VOLUME))
         _batteryTipDismissed.value = prefs.getBoolean(KEY_BATTERY_TIP_DISMISSED, false)
     }
 
@@ -86,6 +92,15 @@ object TimerRepository {
         prefs.edit { putBoolean(KEY_VIBRATE, enabled) }
         _vibrate.value = enabled
     }
+
+    fun setRingVolume(volume: Float) {
+        val clamped = clampVolume(volume)
+        prefs.edit { putFloat(KEY_RING_VOLUME, clamped) }
+        _ringVolume.value = clamped
+    }
+
+    private fun clampVolume(volume: Float): Float =
+        if (volume.isNaN()) TimerConfig.DEFAULT_RING_VOLUME else volume.coerceIn(TimerConfig.MIN_RING_VOLUME, 1f)
 
     fun dismissBatteryTip() {
         prefs.edit { putBoolean(KEY_BATTERY_TIP_DISMISSED, true) }

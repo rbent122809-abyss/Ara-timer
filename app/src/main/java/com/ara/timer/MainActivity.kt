@@ -39,7 +39,6 @@ import com.ara.timer.ui.TimerScreen
 import com.ara.timer.ui.TimerUiState
 import com.ara.timer.ui.Warning
 import java.util.Date
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -63,6 +62,7 @@ class MainActivity : ComponentActivity() {
         onStart = ::onStartClicked,
         onStop = ::onStopClicked,
         onVibrateChange = TimerController::setVibrate,
+        onVolumeChange = ::onVolumeChange,
         onTogglePreview = ::togglePreview,
         onWarningAction = ::onWarningAction,
         onWarningDismiss = { if (it == Warning.Battery) TimerRepository.dismissBatteryTip() },
@@ -74,6 +74,8 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
+        // The volume buttons on this screen adjust the ringtone volume, which the rings follow.
+        volumeControlStream = AudioManager.STREAM_RING
         previewPlayer = RingPlayer(this)
         setContent {
             AraTheme {
@@ -102,6 +104,7 @@ class MainActivity : ComponentActivity() {
     private fun TimerRoute() {
         val session by TimerRepository.session.collectAsStateWithLifecycle()
         val vibrate by TimerRepository.vibrate.collectAsStateWithLifecycle()
+        val ringVolume by TimerRepository.ringVolume.collectAsStateWithLifecycle()
         val batteryTipDismissed by TimerRepository.batteryTipDismissed.collectAsStateWithLifecycle()
         val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -136,7 +139,13 @@ class MainActivity : ComponentActivity() {
         }
 
         val warnings = buildList {
-            if (status.alarmVolumeMuted) add(Warning.Volume)
+            when (status.ringSound) {
+                RingSound.PhoneOnVibrate -> add(Warning.PhoneOnVibrate)
+                RingSound.PhoneOnMute -> add(Warning.PhoneOnMute)
+                RingSound.RingtoneVolumeOff -> add(Warning.RingtoneVolumeOff)
+                RingSound.Audible -> Unit
+            }
+            if (status.doNotDisturb) add(Warning.DoNotDisturb)
             if (status.notificationsOff) add(Warning.Notifications)
             if (status.exactAlarmsDenied) add(Warning.ExactAlarms)
             if (status.batteryRestricted && !batteryTipDismissed) add(Warning.Battery)
@@ -152,6 +161,7 @@ class MainActivity : ComponentActivity() {
             wallClockOffset = wallClockOffset,
             formatClock = { DateFormat.getTimeFormat(this).format(Date(it)) },
             ringtoneText = ringtoneText,
+            ringVolume = ringVolume,
             vibrate = vibrate,
             previewing = previewing,
             warnings = warnings,
@@ -199,7 +209,7 @@ class MainActivity : ComponentActivity() {
         }
         val session = TimerRepository.session.value
         if (session.running && session.displayAt(SystemClock.elapsedRealtime()).isRinging) return
-        previewPlayer.start(vibrate = false)
+        previewPlayer.start(vibrate = false, volume = TimerRepository.ringVolume.value)
         previewing = true
         previewHandler.removeCallbacks(endPreview)
         previewHandler.postDelayed(endPreview, PREVIEW_MS)
@@ -213,27 +223,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun onVolumeChange(volume: Float) {
+        TimerController.setRingVolume(volume)
+        // Dragging the slider during a Test changes it as you listen.
+        previewPlayer.setVolume(TimerRepository.ringVolume.value)
+    }
+
     private fun onWarningAction(warning: Warning) {
         when (warning) {
-            Warning.Volume -> raiseAlarmVolume()
+            Warning.PhoneOnVibrate, Warning.PhoneOnMute, Warning.RingtoneVolumeOff ->
+                if (!SoundSettings.turnSoundOn(this)) openSettings(Intent(Settings.ACTION_SOUND_SETTINGS))
+            Warning.DoNotDisturb ->
+                if (!openSettings(Intent(ZEN_MODE_SETTINGS))) openSettings(Intent(Settings.ACTION_SOUND_SETTINGS))
             Warning.Notifications -> fixNotifications()
             Warning.ExactAlarms -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 openSettings(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, packageUri()))
             }
             Warning.Battery -> requestBatteryExemption()
-        }
-    }
-
-    private fun raiseAlarmVolume() {
-        val audio = getSystemService(AudioManager::class.java) ?: return
-        val max = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        if (max <= 0) return
-        val target = (max * 0.7f).roundToInt().coerceIn(1, max)
-        try {
-            audio.setStreamVolume(AudioManager.STREAM_ALARM, target, AudioManager.FLAG_SHOW_UI)
-        } catch (e: SecurityException) {
-            // e.g. Do Not Disturb policy; let the user change it themselves.
-            openSettings(Intent(Settings.ACTION_SOUND_SETTINGS))
         }
     }
 
@@ -279,5 +285,8 @@ class MainActivity : ComponentActivity() {
         const val TICK_MS = 100L
         const val STATUS_REFRESH_MS = 1_000L
         const val PREVIEW_MS = 4_000L
+
+        /** Do Not Disturb settings screen (not a public constant, so with a fallback). */
+        const val ZEN_MODE_SETTINGS = "android.settings.ZEN_MODE_SETTINGS"
     }
 }

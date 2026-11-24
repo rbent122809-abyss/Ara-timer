@@ -51,6 +51,8 @@ class TimerServiceTest {
         ShadowAlarmManager.setCanScheduleExactAlarms(true)
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         audioManager.mode = AudioManager.MODE_NORMAL
+        audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+        audioManager.setStreamVolume(AudioManager.STREAM_RING, audioManager.getStreamMaxVolume(AudioManager.STREAM_RING), 0)
         // The phone's ringtone is a 3 second clip, so looping matters.
         ShadowMediaPlayer.addMediaInfo(
             DataSource.toDataSource(app, Settings.System.DEFAULT_RINGTONE_URI),
@@ -63,6 +65,7 @@ class TimerServiceTest {
         TimerController.stop(app)
         controllers.forEach { runCatching { it.destroy() } }
         audioManager.mode = AudioManager.MODE_NORMAL
+        audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
     }
 
     // --- helpers -----------------------------------------------------------------------
@@ -502,6 +505,87 @@ class TimerServiceTest {
     }
 
     // --- sound -----------------------------------------------------------------------------
+
+    @Test
+    fun ringPlaysOnTheRingtoneChannel_soThePhoneVolumeButtonsControlIt() {
+        val service = startTimer()
+        advance(five)
+
+        val player = service.ringPlayer.mediaPlayer!!
+        assertEquals(
+            "ringtone channel (volume buttons, ringtone slider, vibrate/mute), not the alarm channel",
+            android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE,
+            shadowOf(player).audioAttributes.usage,
+        )
+        assertEquals(1f, shadowOf(player).leftVolume)
+    }
+
+    @Test
+    fun inAppVolumeSlider_scalesTheRing() {
+        TimerController.setRingVolume(0.5f)
+        val service = startTimer()
+        advance(five)
+
+        val player = shadowOf(service.ringPlayer.mediaPlayer!!)
+        assertEquals(0.25f, player.leftVolume, 0.0001f) // 50% on the slider sounds about half as loud
+        assertEquals(0.25f, player.rightVolume, 0.0001f)
+    }
+
+    @Test
+    fun movingTheSliderDuringARing_changesTheVolumeAtOnce() {
+        val service = startTimer()
+        advance(five + 3_000)
+        val player = shadowOf(service.ringPlayer.mediaPlayer!!)
+        assertEquals(1f, player.leftVolume)
+
+        TimerController.setRingVolume(0.3f)
+
+        assertEquals(0.09f, player.leftVolume, 0.0001f)
+        assertTrue(service.ringPlayer.isSounding)
+        advance(ring)
+        advanceTo(session.ringDue)
+        assertEquals("next ring keeps the new volume", 0.09f, shadowOf(service.ringPlayer.mediaPlayer!!).leftVolume, 0.0001f)
+    }
+
+    @Test
+    fun volumeSetting_isRemembered_andKeptInRange() {
+        TimerController.setRingVolume(0.4f)
+        TimerRepository.init(app) // app restarted
+        assertEquals(0.4f, TimerRepository.ringVolume.value)
+
+        TimerController.setRingVolume(0f)
+        assertEquals(TimerConfig.MIN_RING_VOLUME, TimerRepository.ringVolume.value)
+        TimerController.setRingVolume(7f)
+        assertEquals(1f, TimerRepository.ringVolume.value)
+        TimerController.setRingVolume(Float.NaN)
+        assertEquals(TimerConfig.DEFAULT_RING_VOLUME, TimerRepository.ringVolume.value)
+    }
+
+    @Test
+    fun phoneOnVibrate_ringOnlyBuzzes_andDoesNotDuckMusic() {
+        audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+        val service = startTimer()
+
+        advance(five)
+
+        assertTrue("still the 12 s pause", ringing)
+        assertFalse(service.ringPlayer.isSounding)
+        assertTrue(service.ringPlayer.isVibrating)
+        assertNull("no audio focus taken", shadowOf(audioManager).lastAudioFocusRequest)
+        advance(ring)
+        assertFalse(service.ringPlayer.isVibrating)
+    }
+
+    @Test
+    fun ringtoneVolumeAtZero_ringOnlyBuzzes() {
+        audioManager.setStreamVolume(AudioManager.STREAM_RING, 0, 0)
+        val service = startTimer()
+
+        advance(five)
+
+        assertFalse(service.ringPlayer.isSounding)
+        assertTrue(service.ringPlayer.isVibrating)
+    }
 
     @Test
     fun audioFocusRefused_theRingtoneStillPlays() {

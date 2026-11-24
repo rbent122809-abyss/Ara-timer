@@ -44,6 +44,8 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -78,13 +80,16 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ara.timer.R
+import com.ara.timer.TimerConfig
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private val CardShape = RoundedCornerShape(20.dp)
@@ -204,9 +209,10 @@ private fun LandscapeLayout(
 @Composable
 private fun Details(state: TimerUiState, actions: TimerActions) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Warnings first, so e.g. "phone is on vibrate" is visible without scrolling.
+        state.warnings.forEach { WarningCard(it, state.vibrate, actions) }
         StatsRow(state)
         SettingsCard(state, actions)
-        state.warnings.forEach { WarningCard(it, actions) }
     }
 }
 
@@ -539,6 +545,7 @@ private fun SettingsCard(state: TimerUiState, actions: TimerActions) {
                 )
             }
         }
+        VolumeRow(state.ringVolume, actions.onVolumeChange)
         HorizontalDivider(color = AraColors.Outline, thickness = 1.dp)
         Row(
             modifier = Modifier
@@ -569,6 +576,57 @@ private fun SettingsCard(state: TimerUiState, actions: TimerActions) {
     }
 }
 
+/** The app's own ring volume, on top of the phone's ringtone volume. */
+@Composable
+private fun VolumeRow(volume: Float, onVolumeChange: (Float) -> Unit) {
+    val percent = (volume * 100).roundToInt()
+    val description = stringResource(R.string.ring_volume)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_volume_down),
+            contentDescription = null,
+            tint = AraColors.TextSecondary,
+            modifier = Modifier.size(20.dp),
+        )
+        Slider(
+            value = volume,
+            onValueChange = onVolumeChange,
+            valueRange = TimerConfig.MIN_RING_VOLUME..1f,
+            steps = VOLUME_STEPS,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 6.dp)
+                .semantics { contentDescription = description },
+            colors = SliderDefaults.colors(
+                thumbColor = AraColors.Green,
+                activeTrackColor = AraColors.Green,
+                inactiveTrackColor = AraColors.Track,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent,
+            ),
+        )
+        Icon(
+            painter = painterResource(R.drawable.ic_volume_up),
+            contentDescription = null,
+            tint = AraColors.TextSecondary,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = stringResource(R.string.volume_percent, percent),
+            color = AraColors.TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier.width(44.dp),
+            style = TextStyle(fontFeatureSettings = TABULAR_FIGURES),
+        )
+    }
+}
+
 @Composable
 private fun IconBadge(@DrawableRes icon: Int) {
     Box(
@@ -583,9 +641,14 @@ private fun IconBadge(@DrawableRes icon: Int) {
 }
 
 @Composable
-private fun WarningCard(warning: Warning, actions: TimerActions) {
+private fun WarningCard(warning: Warning, vibrate: Boolean, actions: TimerActions) {
     val (message, action) = when (warning) {
-        Warning.Volume -> R.string.warn_volume to R.string.warn_volume_action
+        Warning.PhoneOnVibrate ->
+            (if (vibrate) R.string.warn_vibrate_buzz else R.string.warn_vibrate_silent) to R.string.sound_on
+        Warning.PhoneOnMute ->
+            (if (vibrate) R.string.warn_mute_buzz else R.string.warn_mute_silent) to R.string.sound_on
+        Warning.RingtoneVolumeOff -> R.string.warn_ringtone_volume_off to R.string.turn_up
+        Warning.DoNotDisturb -> R.string.warn_dnd to R.string.settings
         Warning.Notifications -> R.string.warn_notifications to R.string.allow
         Warning.ExactAlarms -> R.string.warn_exact to R.string.allow
         Warning.Battery -> R.string.warn_battery to R.string.allow
@@ -681,3 +744,6 @@ private fun StartStopButton(running: Boolean, actions: TimerActions) {
 }
 
 private const val DOUBLE_TAP_GUARD_MS = 700L
+
+/** Slider stops between 10% and 100%: 20%, 30% ... 90%. */
+private const val VOLUME_STEPS = 8

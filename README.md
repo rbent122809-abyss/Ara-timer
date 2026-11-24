@@ -14,7 +14,7 @@ One UI 8) and runs on Android 8.0 or later.
 
 ## Install on your phone
 
-1. On the phone, download [`release/AraTimer-v1.1.apk`](release/AraTimer-v1.1.apk)
+1. On the phone, download [`release/AraTimer-v1.2.apk`](release/AraTimer-v1.2.apk)
    (open it on GitHub and tap **Download raw file**).
 2. Open the downloaded file from the notification or from **My Files → Downloads**.
 3. If asked, allow your browser or My Files to **Install unknown apps**, then tap **Install**.
@@ -23,8 +23,8 @@ One UI 8) and runs on Android 8.0 or later.
 4. Open **Ara Timer** and tap **Start**. Allow notifications when asked, so the
    countdown and a Stop button appear in the notification shade and on the lock screen.
 
-**Updating from 1.0:** install 1.1 straight over it; you don't need to uninstall. A timer
-that is running during the update stops, so press Start again afterwards.
+**Updating from 1.0 or 1.1:** install 1.2 straight over it; you don't need to uninstall.
+Updating from 1.0 stops a running timer, so press Start again afterwards.
 
 **For the most reliable rings with the screen off:** go to Settings → Apps → Ara Timer →
 Battery and choose **Unrestricted**. The app offers a shortcut to this setting.
@@ -46,9 +46,14 @@ Start ─ 5:00 countdown ─ ring 12 s (paused) ─ 5:00 countdown ─ ring 12 s
 - **The sound is your phone's ringtone** (Settings → Sounds and vibration → Ringtone). On
   an A56 that hasn't been customised, this is Samsung's default ringtone. If the ringtone
   is set to silent, the alarm sound plays instead.
-- **It plays at alarm volume**, so you hear it even when the phone is on vibrate or silent.
-  If the alarm volume is at zero, the app warns you and offers a **Turn up** button. Use
-  **Test** to hear it.
+- **It rings like an incoming call, at your ringtone volume:**
+  - The **volume buttons turn it down or up, even while it's ringing**, and so does the
+    Ringtone slider in the phone's volume panel.
+  - The **Ring volume** slider in the app (10–100%) makes it quieter still, without
+    changing your phone's ringtone volume for calls. Use **Test** to hear the result.
+- **On vibrate or mute the rings only buzz**, like a phone call. The same applies with the
+  ringtone volume at zero, and **Do Not Disturb** may silence them. The app shows a card
+  when any of these is the case, with a **Sound on** button.
 - **Music keeps playing**, quieter, while the ring plays. During a phone or video call the
   ring vibrates only. If a call starts in the middle of a ring, the sound stops at once.
 - **Vibrate** (on by default) buzzes along with each ring.
@@ -116,7 +121,8 @@ keyPassword=...
 | `Session.kt` | The timer's state machine and maths (pure Kotlin, unit tested) |
 | `TimerService.kt` | Foreground service: runs the state machine, plays and stops each ring |
 | `TimerController.kt` | Start / Stop / alarm entry points, stale-session checks |
-| `RingPlayer.kt` | Ringtone playback (alarm channel, looping, ducking, calls, vibration, fallbacks) |
+| `RingPlayer.kt` | Ringtone playback (ringtone channel, volume, looping, ducking, calls, vibration, fallbacks) |
+| `DeviceStatus.kt` | Checks behind the warning cards (vibrate/mute, ringtone volume, Do Not Disturb, …) |
 | `Alarms.kt` | Exact wake-up alarms, wake-lock helpers, reboot and user-stop detection |
 | `TimerRepository.kt` | Shared state, persisted across process death |
 | `ui/TimerScreen.kt` | Jetpack Compose UI |
