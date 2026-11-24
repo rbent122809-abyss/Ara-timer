@@ -14,32 +14,46 @@ import java.util.Date
 
 object Notifications {
     const val ID = 1
-    private const val CHANNEL_ID = "timer"
+
+    /**
+     * Default importance (but silent: no sound, no vibration) so the countdown and its
+     * Stop button also show on the lock screen.
+     */
+    private const val CHANNEL_ID = "timer_running"
+
+    /** Channel used by version 1.0 (low importance); removed on upgrade. */
+    private const val OLD_CHANNEL_ID = "timer"
+
     private const val REQUEST_OPEN = 10
     private const val REQUEST_STOP = 11
 
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        if (manager.getNotificationChannel(OLD_CHANNEL_ID) != null) {
+            manager.deleteNotificationChannel(OLD_CHANNEL_ID)
+        }
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         val channel = NotificationChannel(
             CHANNEL_ID,
             context.getString(R.string.channel_name),
-            NotificationManager.IMPORTANCE_LOW,
+            NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = context.getString(R.string.channel_description)
             setShowBadge(false)
             setSound(null, null)
             enableVibration(false)
+            enableLights(false)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
         manager.createNotificationChannel(channel)
     }
 
-    fun build(context: Context, session: Session, ringing: Boolean): Notification {
+    fun build(context: Context, session: Session, now: Long): Notification {
         val openApp = PendingIntent.getActivity(
             context,
             REQUEST_OPEN,
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val stop = PendingIntent.getBroadcast(
@@ -48,6 +62,7 @@ object Notifications {
             Intent(context, TimerReceiver::class.java).setAction(TimerReceiver.ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val wallNow = System.currentTimeMillis()
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_timer)
@@ -57,32 +72,29 @@ object Notifications {
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openApp)
             .addAction(R.drawable.ic_stop, context.getString(R.string.stop), stop)
+            // Live countdown drawn by the system: to the next ring, or to the end of this one.
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setChronometerCountDown(true)
 
-        if (ringing) {
+        if (session.isRinging) {
             builder
                 .setContentTitle(context.getString(R.string.notif_title_ringing))
-                .setContentText(context.getString(R.string.notif_text_ringing, session.ringCount))
-                .setShowWhen(false)
-                .setUsesChronometer(false)
+                .setContentText(context.getString(R.string.notif_text_ringing, session.rings))
+                .setWhen(wallNow + session.ringMsLeft(now))
         } else {
-            val now = SystemClock.elapsedRealtime()
-            val msLeft = (session.nextDueTime - now).coerceAtLeast(0L)
-            val nextAt = DateFormat.getTimeFormat(context).format(Date(System.currentTimeMillis() + msLeft))
+            val msLeft = session.countdownMs(now)
+            val nextAt = DateFormat.getTimeFormat(context).format(Date(wallNow + msLeft))
             val ringsSoFar = context.resources.getQuantityString(
-                R.plurals.rings_so_far, session.ringCount, session.ringCount,
+                R.plurals.rings_so_far, session.rings, session.rings,
             )
             builder
                 .setContentTitle(context.getString(R.string.notif_title_running))
                 .setContentText(context.getString(R.string.notif_text_running, nextAt, ringsSoFar))
-                // Live countdown to the next ring, drawn by the system.
-                .setWhen(System.currentTimeMillis() + msLeft)
-                .setShowWhen(true)
-                .setUsesChronometer(true)
-                .setChronometerCountDown(true)
+                .setWhen(wallNow + msLeft)
         }
         return builder.build()
     }

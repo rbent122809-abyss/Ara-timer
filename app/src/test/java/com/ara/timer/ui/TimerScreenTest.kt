@@ -6,15 +6,18 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.ara.timer.Session
-import com.ara.timer.TimerConfig
 import java.io.File
 import java.time.Duration
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,24 +39,34 @@ class TimerScreenTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val minute = 60_000L
-    private val session = Session(running = true, startElapsed = 0L, startWall = 0L, lastIndex = 3, ringCount = 3)
+    private val cycleStart = 1_000_000L
+
+    /** Three rings done, 2:28 into the fourth countdown. */
+    private val counting = Session(running = true, cycleStart = cycleStart, rings = 3)
+    private val countingNow = cycleStart + 2 * minute + 28_000
+
+    /** The fourth ring started 4 seconds ago. */
+    private val ringing = Session(running = true, cycleStart = cycleStart, ringStart = cycleStart + 5 * minute, rings = 4)
+    private val ringingNow = cycleStart + 5 * minute + 4_000
 
     private fun state(
-        running: Boolean,
-        now: Long = 17 * minute + 28_000,
-        ringingUntil: Long = 0L,
+        session: Session,
+        now: Long,
         warnings: List<Warning> = emptyList(),
         ringtone: String = "Over the Horizon",
     ) = TimerUiState.from(
-        session = if (running) session else Session.IDLE,
-        ringingUntil = ringingUntil,
+        session = session,
         now = now,
+        wallClockOffset = 0L,
         formatClock = { "3:45 PM" },
         ringtoneText = ringtone,
         vibrate = true,
         previewing = false,
         warnings = warnings,
     )
+
+    private fun state(running: Boolean, warnings: List<Warning> = emptyList()) =
+        if (running) state(counting, countingNow, warnings) else state(Session.IDLE, 0L, warnings)
 
     private fun snap(name: String, state: TimerUiState, actions: TimerActions = TimerActions.NoOp) {
         compose.setContent { AraTheme { TimerScreen(state, actions) } }
@@ -86,12 +99,36 @@ class TimerScreenTest {
     }
 
     @Test
-    fun ringing() {
-        val now = 20 * minute + 4_000
-        val s = state(running = true, now = now, ringingUntil = now + TimerConfig.RING_DURATION_MS - 4_000)
+    fun ringing_showsTheTimerPaused() {
+        val s = state(ringing, ringingNow)
+        assertTrue(s.ringing)
         assertEquals(8, s.ringSecondsLeft)
+        assertEquals("elapsed paused at 4 x 5:00", "20:00", s.elapsedText)
+        assertEquals(1f, s.cycleFraction)
         snap("3_ringing", s)
-        compose.onNodeWithText("8 s left").assertExists()
+        compose.onAllNodesWithText("Ringing").assertCountEquals(2) // status pill + dial
+        compose.onNodeWithText("Timer paused").assertExists()
+        compose.onNodeWithText("resumes in 8 s").assertExists()
+        compose.onNodeWithText("20:00").assertExists()
+    }
+
+    @Test
+    fun pauseAndResume_asSeenOnScreen() {
+        val ringEnd = ringing.ringEnd
+        // Throughout the ring: elapsed frozen at 20:00, ring counts down to resuming.
+        assertEquals("20:00", state(ringing, ringing.ringStart).elapsedText)
+        assertEquals(12, state(ringing, ringing.ringStart).ringSecondsLeft)
+        assertEquals("20:00", state(ringing, ringEnd - 1).elapsedText)
+        assertEquals(1, state(ringing, ringEnd - 1).ringSecondsLeft)
+        // As soon as the 12 seconds are up the screen resumes, even before the service
+        // has processed the end of the ring.
+        val resumed = state(ringing, ringEnd)
+        assertFalse(resumed.ringing)
+        assertEquals("05:00", resumed.countdownText)
+        assertEquals("20:00", resumed.elapsedText)
+        val oneSecondLater = state(ringing, ringEnd + 1_000)
+        assertEquals("04:59", oneSecondLater.countdownText)
+        assertEquals("20:01", oneSecondLater.elapsedText)
     }
 
     @Test

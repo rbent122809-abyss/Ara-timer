@@ -8,12 +8,11 @@ enum class Warning { Volume, Notifications, ExactAlarms, Battery }
 
 data class TimerUiState(
     val running: Boolean,
+    /** Ringing: the countdown and the elapsed time are paused. */
     val ringing: Boolean,
-    /** Whole seconds left in the current ring. */
+    /** Whole seconds until the ring ends and the timer resumes. */
     val ringSecondsLeft: Int,
-    /** 0..1, how much of the current ring has played. */
-    val ringFraction: Float,
-    /** 0..1, how far through the current 5 minute cycle we are. */
+    /** 0..1: how far through the current 5 minute countdown we are (1 while ringing). */
     val cycleFraction: Float,
     val countdownText: String,
     val elapsedText: String,
@@ -26,30 +25,48 @@ data class TimerUiState(
     val warnings: List<Warning>,
 ) {
     companion object {
+        /**
+         * @param now SystemClock.elapsedRealtime()
+         * @param wallClockOffset System.currentTimeMillis() - SystemClock.elapsedRealtime()
+         * @param formatClock formats a System.currentTimeMillis() value as a clock time
+         */
         fun from(
             session: Session,
-            ringingUntil: Long,
             now: Long,
+            wallClockOffset: Long,
             formatClock: (Long) -> String,
             ringtoneText: String,
             vibrate: Boolean,
             previewing: Boolean,
             warnings: List<Warning>,
         ): TimerUiState {
-            val running = session.running
-            val ringMsLeft = if (running) (ringingUntil - now).coerceIn(0L, TimerConfig.RING_DURATION_MS) else 0L
-            val ringing = ringMsLeft > 0L
-            val untilNext = if (running) session.msUntilNextRing(now) else TimerConfig.INTERVAL_MS
+            if (!session.running) {
+                return TimerUiState(
+                    running = false,
+                    ringing = false,
+                    ringSecondsLeft = 0,
+                    cycleFraction = 0f,
+                    countdownText = TimeFormat.countdown(TimerConfig.INTERVAL_MS),
+                    elapsedText = TimeFormat.elapsed(0L),
+                    ringCount = 0,
+                    nextAtText = null,
+                    ringtoneText = ringtoneText,
+                    vibrate = vibrate,
+                    previewing = previewing,
+                    warnings = warnings,
+                )
+            }
+            val shown = session.displayAt(now)
+            val countdown = shown.countdownMs(now)
             return TimerUiState(
-                running = running,
-                ringing = ringing,
-                ringSecondsLeft = ((ringMsLeft + 999L) / 1000L).toInt(),
-                ringFraction = 1f - ringMsLeft.toFloat() / TimerConfig.RING_DURATION_MS,
-                cycleFraction = if (running) 1f - untilNext.toFloat() / TimerConfig.INTERVAL_MS else 0f,
-                countdownText = TimeFormat.countdown(untilNext),
-                elapsedText = TimeFormat.elapsed(if (running) session.elapsedMs(now) else 0L),
-                ringCount = if (running) session.ringCount else 0,
-                nextAtText = if (running) formatClock(session.nextRingWallTime(now)) else null,
+                running = true,
+                ringing = shown.isRinging,
+                ringSecondsLeft = TimeFormat.secondsLeft(shown.ringMsLeft(now)),
+                cycleFraction = if (shown.isRinging) 1f else 1f - countdown.toFloat() / TimerConfig.INTERVAL_MS,
+                countdownText = TimeFormat.countdown(countdown),
+                elapsedText = TimeFormat.elapsed(shown.activeMs(now)),
+                ringCount = shown.rings,
+                nextAtText = formatClock(shown.nextRingDue + wallClockOffset),
                 ringtoneText = ringtoneText,
                 vibrate = vibrate,
                 previewing = previewing,

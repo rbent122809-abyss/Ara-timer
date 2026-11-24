@@ -101,7 +101,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun TimerRoute() {
         val session by TimerRepository.session.collectAsStateWithLifecycle()
-        val ringingUntil by TimerRepository.ringingUntil.collectAsStateWithLifecycle()
         val vibrate by TimerRepository.vibrate.collectAsStateWithLifecycle()
         val batteryTipDismissed by TimerRepository.batteryTipDismissed.collectAsStateWithLifecycle()
         val lifecycleOwner = LocalLifecycleOwner.current
@@ -120,22 +119,20 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Phone settings that affect the rings; re-checked while the screen is visible.
+        // Phone settings that affect the rings; re-checked (off the main thread) while the
+        // screen is visible.
         var status by remember { mutableStateOf(DeviceStatus.read(this)) }
         var ringtone by remember { mutableStateOf<RingtoneLabel>(RingtoneLabel.Unnamed) }
+        var wallClockOffset by remember { mutableLongStateOf(wallClockOffsetNow()) }
         LaunchedEffect(lifecycleOwner) {
             lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 ringtone = withContext(Dispatchers.IO) { RingtoneLabel.read(applicationContext) }
                 while (true) {
-                    status = DeviceStatus.read(this@MainActivity)
+                    status = withContext(Dispatchers.IO) { DeviceStatus.read(applicationContext) }
+                    wallClockOffset = wallClockOffsetNow()
                     delay(STATUS_REFRESH_MS)
                 }
             }
-        }
-
-        val ringing = session.running && ringingUntil > now
-        LaunchedEffect(ringing) {
-            if (ringing) stopPreview()
         }
 
         val warnings = buildList {
@@ -151,15 +148,24 @@ class MainActivity : ComponentActivity() {
         }
         val state = TimerUiState.from(
             session = session,
-            ringingUntil = ringingUntil,
             now = now,
+            wallClockOffset = wallClockOffset,
             formatClock = { DateFormat.getTimeFormat(this).format(Date(it)) },
             ringtoneText = ringtoneText,
             vibrate = vibrate,
             previewing = previewing,
             warnings = warnings,
         )
+        LaunchedEffect(state.ringing) {
+            if (state.ringing) stopPreview()
+        }
         TimerScreen(state, actions)
+    }
+
+    /** Converts elapsedRealtime to clock time; whole seconds so "Next at" never flickers. */
+    private fun wallClockOffsetNow(): Long {
+        val offset = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+        return (offset + 500L) / 1000L * 1000L
     }
 
     private fun onStartClicked() {
@@ -191,7 +197,8 @@ class MainActivity : ComponentActivity() {
             stopPreview()
             return
         }
-        if (TimerRepository.ringingUntil.value > SystemClock.elapsedRealtime()) return
+        val session = TimerRepository.session.value
+        if (session.running && session.displayAt(SystemClock.elapsedRealtime()).isRinging) return
         previewPlayer.start(vibrate = false)
         previewing = true
         previewHandler.removeCallbacks(endPreview)

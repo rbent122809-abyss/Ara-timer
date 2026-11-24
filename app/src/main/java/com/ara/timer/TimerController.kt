@@ -14,18 +14,21 @@ object TimerController {
     /** Starts a new session. Returns false if the timer could not be started. */
     fun start(context: Context): Boolean {
         val app = context.applicationContext
-        if (TimerRepository.session.value.running) {
-            ensureService(app)
-            return true
+        val current = TimerRepository.session.value
+        if (current.running) {
+            if (!isStale(app, current)) {
+                ensureService(app)
+                return true
+            }
+            stop(app) // leftover from before a reboot or a force stop: start fresh
         }
-        val session = Session(
-            running = true,
-            startElapsed = SystemClock.elapsedRealtime(),
-            startWall = System.currentTimeMillis(),
+        val session = Session.start(
+            now = SystemClock.elapsedRealtime(),
+            wallNow = System.currentTimeMillis(),
             bootCount = Device.bootCount(app),
         )
         TimerRepository.saveSession(session)
-        Alarms.schedule(app, session.nextDueTime)
+        Alarms.schedule(app, session.nextTransition)
         if (!startService(app)) {
             TimerRepository.clearSession()
             Alarms.cancel(app)
@@ -67,7 +70,7 @@ object TimerController {
             it.onAlarm()
             return
         }
-        // Our process was killed and restarted by the alarm.
+        // Our process had been killed; the alarm started it again.
         val session = TimerRepository.session.value
         if (!session.running) return
         if (isStale(context, session)) {
@@ -76,10 +79,9 @@ object TimerController {
         }
         BridgeWakeLock.acquire(context)
         if (!startService(context.applicationContext)) {
-            // Could not come back to the foreground right now; keep the chain of alarms
-            // alive so the next ring gets another chance.
-            val now = SystemClock.elapsedRealtime()
-            Alarms.schedule(context, session.dueTime(session.dueIndexAt(now) + 1))
+            // Android refused to let us come back right now. Keep an alarm armed so the
+            // session gets another chance instead of silently dying.
+            Alarms.schedule(context, SystemClock.elapsedRealtime() + TimerConfig.INTERVAL_MS)
             BridgeWakeLock.release()
         }
     }
@@ -88,10 +90,15 @@ object TimerController {
         TimerRepository.setVibrate(enabled)
     }
 
-    /** A session saved before a reboot can't be resumed: elapsedRealtime started over. */
+    /**
+     * A saved session must not be resumed if the phone rebooted since (elapsedRealtime
+     * started over) or if the user stopped the app from Android's settings or the
+     * "Active apps" panel; both count as stopping the timer.
+     */
     fun isStale(context: Context, session: Session): Boolean =
         session.bootCount != Device.bootCount(context) ||
-            session.startElapsed > SystemClock.elapsedRealtime()
+            session.cycleStart > SystemClock.elapsedRealtime() ||
+            Device.userStoppedAppSince(context, session.startWall)
 
     private fun startService(context: Context): Boolean = try {
         ContextCompat.startForegroundService(context, Intent(context, TimerService::class.java))

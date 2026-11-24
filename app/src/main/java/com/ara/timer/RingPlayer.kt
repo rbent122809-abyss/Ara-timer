@@ -23,20 +23,20 @@ import androidx.annotation.VisibleForTesting
  * Plays the phone's default ringtone, looped, until [stop] is called.
  *
  * It uses the ALARM audio channel, so it is heard even when the phone is set to vibrate
- * or silent, at the phone's alarm volume. Music playing at the same time is ducked.
- * During a phone call the sound is skipped (the system refuses audio focus) and only
- * the vibration runs.
+ * or silent, at the phone's alarm volume. Other audio (music) is asked to duck. During a
+ * phone or video call the sound is skipped and only the vibration runs.
  */
 class RingPlayer(context: Context) {
 
     private val context = context.applicationContext
-    private val audioManager = this.context.getSystemService(AudioManager::class.java)
+    private val audioManager: AudioManager? = this.context.getSystemService(AudioManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
 
     private var player: MediaPlayer? = null
     private var tone: ToneGenerator? = null
     private var focusRequest: AudioFocusRequest? = null
     private var vibrator: Vibrator? = null
+    private var modeListener: AudioManager.OnModeChangedListener? = null
 
     private val attributes: AudioAttributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ALARM)
@@ -58,10 +58,18 @@ class RingPlayer(context: Context) {
 
     fun start(vibrate: Boolean) {
         stop()
-        if (requestFocus()) {
-            if (!startRingtone()) startBeeps()
-        } else {
-            Log.i(TAG, "Audio focus refused (in a call?) - ring is vibration only")
+        try {
+            if (isInCall()) {
+                Log.i(TAG, "Call in progress: this ring vibrates only")
+            } else {
+                // Best effort only. Android 15+ may refuse focus to apps that are not on
+                // screen; the ring must play regardless, so the result is not checked.
+                requestFocus()
+                if (!startRingtone()) startBeeps()
+                watchForCalls()
+            }
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "Could not start the ring sound", e)
         }
         if (vibrate) startVibration()
     }
@@ -70,6 +78,7 @@ class RingPlayer(context: Context) {
         handler.removeCallbacksAndMessages(null)
         stopSound()
         stopVibration()
+        stopWatchingForCalls()
         abandonFocus()
     }
 
@@ -92,6 +101,15 @@ class RingPlayer(context: Context) {
             generator.release()
         }
         tone = null
+    }
+
+    /** Phone call, video/VoIP call, or an incoming call ringing. */
+    private fun isInCall(): Boolean {
+        val mode = audioManager?.mode ?: return false
+        return mode == AudioManager.MODE_IN_CALL ||
+            mode == AudioManager.MODE_IN_COMMUNICATION ||
+            mode == AudioManager.MODE_RINGTONE ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && mode == AudioManager.MODE_CALL_SCREENING)
     }
 
     private fun startRingtone(): Boolean {
@@ -162,28 +180,61 @@ class RingPlayer(context: Context) {
         handler.post(beep)
     }
 
-    private fun requestFocus(): Boolean {
-        val manager = audioManager ?: return true
+    private fun requestFocus() {
+        val manager = audioManager ?: return
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
             .setAudioAttributes(attributes)
             .setOnAudioFocusChangeListener({ change ->
-                // A phone call (or similar) took over: go quiet, keep vibrating.
+                // Something more important took over the audio (e.g. a call): go quiet,
+                // keep vibrating.
                 if (change == AudioManager.AUDIOFOCUS_LOSS ||
                     change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
                 ) {
-                    handler.removeCallbacksAndMessages(null)
-                    stopSound()
+                    silence()
                 }
             }, handler)
             .build()
         focusRequest = request
-        return manager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_FAILED
+        manager.requestAudioFocus(request)
     }
 
     private fun abandonFocus() {
         val request = focusRequest ?: return
-        audioManager?.abandonAudioFocusRequest(request)
         focusRequest = null
+        try {
+            audioManager?.abandonAudioFocusRequest(request)
+        } catch (e: RuntimeException) {
+            // Ignore.
+        }
+    }
+
+    /** Stops the sound when a call starts in the middle of a ring (Android 12+). */
+    private fun watchForCalls() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val manager = audioManager ?: return
+        val listener = AudioManager.OnModeChangedListener { if (isInCall()) silence() }
+        try {
+            manager.addOnModeChangedListener(context.mainExecutor, listener)
+            modeListener = listener
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "Cannot watch for calls", e)
+        }
+    }
+
+    private fun stopWatchingForCalls() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val listener = modeListener ?: return
+        modeListener = null
+        try {
+            audioManager?.removeOnModeChangedListener(listener)
+        } catch (e: RuntimeException) {
+            // Ignore.
+        }
+    }
+
+    private fun silence() {
+        handler.removeCallbacksAndMessages(null)
+        stopSound()
     }
 
     private fun startVibration() {
@@ -209,8 +260,13 @@ class RingPlayer(context: Context) {
     }
 
     private fun stopVibration() {
-        vibrator?.cancel()
+        val device = vibrator ?: return
         vibrator = null
+        try {
+            device.cancel()
+        } catch (e: RuntimeException) {
+            // Ignore.
+        }
     }
 
     private companion object {

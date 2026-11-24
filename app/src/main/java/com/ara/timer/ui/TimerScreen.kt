@@ -293,11 +293,8 @@ private fun Dial(state: TimerUiState, accent: Color, size: Dp) {
     } else {
         null
     }
-    val progress = when {
-        state.ringing -> state.ringFraction
-        state.running -> state.cycleFraction
-        else -> 0f
-    }.coerceIn(0f, 1f)
+    // While ringing the timer is paused at the end of its countdown, so the ring stays full.
+    val progress = if (state.running) state.cycleFraction.coerceIn(0f, 1f) else 0f
 
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
@@ -369,15 +366,17 @@ private fun Dial(state: TimerUiState, accent: Color, size: Dp) {
                     size = arcSize,
                     style = Stroke(strokeWidth, cap = StrokeCap.Round),
                 )
-                val headAngle = Math.toRadians(-90.0 + sweep)
-                drawCircle(
-                    color = Color.White,
-                    radius = strokeWidth * 0.30f,
-                    center = Offset(
-                        c.x + cos(headAngle).toFloat() * radius,
-                        c.y + sin(headAngle).toFloat() * radius,
-                    ),
-                )
+                if (!state.ringing) { // no moving tip while the timer is paused
+                    val headAngle = Math.toRadians(-90.0 + sweep)
+                    drawCircle(
+                        color = Color.White,
+                        radius = strokeWidth * 0.30f,
+                        center = Offset(
+                            c.x + cos(headAngle).toFloat() * radius,
+                            c.y + sin(headAngle).toFloat() * radius,
+                        ),
+                    )
+                }
             }
         }
         DialCenter(state, accent, size)
@@ -400,20 +399,28 @@ private fun DialCenter(state: TimerUiState, accent: Color, dialSize: Dp) {
                 contentDescription = null,
                 tint = accent,
                 modifier = Modifier
-                    .size(dialSize * 0.17f)
+                    .size(dialSize * 0.15f)
                     .graphicsLayer { rotationZ = wobble },
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 text = stringResource(R.string.ringing),
                 color = accent,
                 fontSize = with(density) { (dialSize * 0.11f).toSp() },
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
             )
             Text(
-                text = stringResource(R.string.ringing_seconds_left, state.ringSecondsLeft),
+                text = stringResource(R.string.timer_paused),
+                color = AraColors.TextPrimary,
+                fontSize = with(density) { (dialSize * 0.05f).toSp() },
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+            Text(
+                text = stringResource(R.string.resumes_in_seconds, state.ringSecondsLeft),
                 color = AraColors.TextSecondary,
-                fontSize = with(density) { (dialSize * 0.052f).toSp() },
+                fontSize = with(density) { (dialSize * 0.05f).toSp() },
                 maxLines = 1,
                 style = TextStyle(fontFeatureSettings = TABULAR_FIGURES),
             )
@@ -445,13 +452,24 @@ private fun StatsRow(state: TimerUiState) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         StatCard(stringResource(R.string.stat_rings), state.ringCount.toString(), Modifier.weight(1f).fillMaxHeight())
-        StatCard(stringResource(R.string.stat_elapsed), state.elapsedText, Modifier.weight(1f).fillMaxHeight())
+        StatCard(
+            label = stringResource(R.string.stat_elapsed),
+            value = state.elapsedText,
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            // Amber while ringing: the elapsed time is paused.
+            valueColor = if (state.ringing) AraColors.Amber else AraColors.TextPrimary,
+        )
         StatCard(stringResource(R.string.stat_next), state.nextAtText ?: "—", Modifier.weight(1f).fillMaxHeight())
     }
 }
 
 @Composable
-private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
+private fun StatCard(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = AraColors.TextPrimary,
+) {
     Column(
         modifier = modifier
             .clip(CardShape)
@@ -473,7 +491,7 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
         BasicText(
             text = value,
             style = TextStyle(
-                color = AraColors.TextPrimary,
+                color = valueColor,
                 fontWeight = FontWeight.SemiBold,
                 fontFeatureSettings = TABULAR_FIGURES,
             ),

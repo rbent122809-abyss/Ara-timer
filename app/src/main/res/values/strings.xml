@@ -16,7 +16,8 @@
     <string name="until_next_ring">until next ring</string>
     <string name="every_five_minutes">rings every 5 minutes</string>
     <string name="ringing">Ringing</string>
-    <string name="ringing_seconds_left">%1$d s left</string>
+    <string name="timer_paused">Timer paused</string>
+    <string name="resumes_in_seconds">resumes in %1$d s</string>
 
     <string name="stat_rings">Rings</string>
     <string name="stat_elapsed">Elapsed</string>
@@ -43,8 +44,8 @@
     <string name="channel_description">Shows the running cleaning timer</string>
     <string name="notif_title_running">Cleaning timer running</string>
     <string name="notif_text_running">Next ring at %1$s · %2$s</string>
-    <string name="notif_title_ringing">Ringing · keep going!</string>
-    <string name="notif_text_ringing">Ring %1$d · stops after 12 seconds</string>
+    <string name="notif_title_ringing">Ringing · timer paused</string>
+    <string name="notif_text_ringing">Ring %1$d · the timer resumes when the ring ends</string>
     <plurals name="rings_so_far">
         <item quantity="one">%d ring so far</item>
         <item quantity="other">%d rings so far</item>

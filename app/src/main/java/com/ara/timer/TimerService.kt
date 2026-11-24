@@ -18,12 +18,14 @@ import androidx.core.app.ServiceCompat
 
 /**
  * Foreground service that owns a running session: it keeps the process alive, shows the
- * ongoing notification, schedules each ring and plays it for 12 seconds.
+ * ongoing notification, and starts and stops each 12 second ring.
  *
- * Two triggers lead to a ring, and both funnel into [evaluate], which plays each ring at
- * most once:
+ * Everything goes through [evaluate], which advances the [Session] state machine to the
+ * current time and then arms a wake-up for the next transition (the next ring starting,
+ * or the current ring ending). Two wake-ups are armed for every transition:
  *  - an exact AlarmManager alarm, which wakes the phone from deep sleep (Doze);
- *  - an in-process Handler timer, which covers the time the CPU is already awake.
+ *  - an in-process Handler timer, for when the CPU is already awake.
+ * Whichever arrives first does the work; the other then finds nothing to do.
  */
 class TimerService : Service() {
 
@@ -31,11 +33,12 @@ class TimerService : Service() {
     private lateinit var ringer: RingPlayer
     private lateinit var ringWakeLock: PowerManager.WakeLock
     private lateinit var fallbackWakeLock: PowerManager.WakeLock
-    private var ringing = false
     private var inForeground = false
 
+    /** ringStart of the ring whose sound is playing right now, or NOT_RINGING. */
+    private var soundingRing = Session.NOT_RINGING
+
     private val tick = Runnable { evaluate() }
-    private val endRing = Runnable { finishRing() }
 
     override fun onCreate() {
         super.onCreate()
@@ -75,71 +78,62 @@ class TimerService : Service() {
         // The alarm's own wake lock ends when onReceive returns; hold ours while working.
         ringWakeLock.acquire(TimerConfig.RING_DURATION_MS + WAKE_LOCK_MARGIN_MS)
         evaluate()
-        if (!ringing) ringWakeLock.releaseSafely()
+        if (soundingRing == Session.NOT_RINGING) ringWakeLock.releaseSafely()
     }
 
-    /** Plays the ring if one is due, then schedules the next one. */
+    /** Brings sound, schedule and notification in line with the session at this moment. */
     private fun evaluate() {
-        val session = TimerRepository.session.value
-        if (!session.running) {
+        val before = TimerRepository.session.value
+        if (!before.running) {
             shutdown()
             return
         }
-        val now = SystemClock.elapsedRealtime()
-        val dueIndex = session.dueIndexAt(now)
-        var current = session
-        if (dueIndex > session.lastIndex) {
-            val lateBy = now - session.dueTime(dueIndex)
-            val playIt = lateBy <= TimerConfig.MAX_LATE_MS && !ringing
-            current = session.copy(
-                lastIndex = dueIndex,
-                ringCount = session.ringCount + if (playIt) 1 else 0,
-            )
-            TimerRepository.saveSession(current)
-            if (playIt) startRing()
+        var session = before.advance(SystemClock.elapsedRealtime())
+
+        if (session.isRinging) {
+            if (soundingRing != session.ringStart) {
+                // A ring is starting, or resuming after our process was restarted mid-ring.
+                ringer.stop()
+                ringWakeLock.acquire(TimerConfig.RING_DURATION_MS + WAKE_LOCK_MARGIN_MS)
+                ringer.start(vibrate = TimerRepository.vibrate.value)
+                if (session.ringStart != before.ringStart) {
+                    // A brand-new ring: its 12 seconds count from when the sound actually started.
+                    session = session.copy(ringStart = SystemClock.elapsedRealtime())
+                }
+                soundingRing = session.ringStart
+            }
+        } else if (soundingRing != Session.NOT_RINGING) {
+            // The 12 seconds are over: silence, and the countdown resumes.
+            ringer.stop()
+            soundingRing = Session.NOT_RINGING
+            ringWakeLock.releaseSafely()
         }
-        scheduleNext(current, now)
+
+        if (session != before) TimerRepository.saveSession(session)
+        scheduleNext(session, SystemClock.elapsedRealtime())
         refreshNotification()
     }
 
     private fun scheduleNext(session: Session, now: Long) {
-        val next = session.nextDueTime
+        val next = session.nextTransition
+        val delay = (next - now).coerceAtLeast(0L)
         Alarms.schedule(this, next)
         handler.removeCallbacks(tick)
-        handler.postDelayed(tick, (next - now).coerceAtLeast(0L))
+        handler.postDelayed(tick, delay)
         if (Alarms.canScheduleExact(this)) {
             fallbackWakeLock.releaseSafely()
         } else {
-            // Without exact alarms the phone may sleep through the ring, so keep the CPU
-            // awake until just after it (renewed every cycle).
-            fallbackWakeLock.acquire(next - now + WAKE_LOCK_MARGIN_MS)
+            // Without exact alarms the phone may sleep through the transition, so keep the
+            // CPU awake until just after it (renewed every time).
+            fallbackWakeLock.acquire(delay + WAKE_LOCK_MARGIN_MS)
         }
-    }
-
-    private fun startRing() {
-        ringing = true
-        ringWakeLock.acquire(TimerConfig.RING_DURATION_MS + WAKE_LOCK_MARGIN_MS)
-        ringer.start(vibrate = TimerRepository.vibrate.value)
-        TimerRepository.setRingingUntil(SystemClock.elapsedRealtime() + TimerConfig.RING_DURATION_MS)
-        handler.removeCallbacks(endRing)
-        handler.postDelayed(endRing, TimerConfig.RING_DURATION_MS)
-    }
-
-    private fun finishRing() {
-        handler.removeCallbacks(endRing)
-        ringer.stop()
-        ringing = false
-        TimerRepository.setRingingUntil(0L)
-        ringWakeLock.releaseSafely()
-        if (TimerRepository.session.value.running) refreshNotification()
     }
 
     /** Ends everything right away: sound, vibration, timers, wake locks and the service. */
     fun shutdown() {
         handler.removeCallbacksAndMessages(null)
         ringer.stop()
-        ringing = false
-        TimerRepository.setRingingUntil(0L)
+        soundingRing = Session.NOT_RINGING
         ringWakeLock.releaseSafely()
         fallbackWakeLock.releaseSafely()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -150,8 +144,7 @@ class TimerService : Service() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         ringer.stop()
-        ringing = false
-        TimerRepository.setRingingUntil(0L)
+        soundingRing = Session.NOT_RINGING
         ringWakeLock.releaseSafely()
         fallbackWakeLock.releaseSafely()
         if (instance === this) instance = null
@@ -159,7 +152,9 @@ class TimerService : Service() {
     }
 
     private fun enterForeground(): Boolean = try {
-        val notification = Notifications.build(this, TimerRepository.session.value, ringing)
+        val notification = Notifications.build(
+            this, TimerRepository.session.value, SystemClock.elapsedRealtime(),
+        )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 Notifications.ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
@@ -183,8 +178,9 @@ class TimerService : Service() {
         ) {
             return
         }
-        getSystemService(NotificationManager::class.java)
-            ?.notify(Notifications.ID, Notifications.build(this, session, ringing))
+        getSystemService(NotificationManager::class.java)?.notify(
+            Notifications.ID, Notifications.build(this, session, SystemClock.elapsedRealtime()),
+        )
     }
 
     @VisibleForTesting

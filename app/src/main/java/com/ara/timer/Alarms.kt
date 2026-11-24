@@ -1,6 +1,8 @@
 package com.ara.timer
 
+import android.app.ActivityManager
 import android.app.AlarmManager
+import android.app.ApplicationExitInfo
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -63,6 +65,28 @@ object Device {
         Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
     } catch (e: Exception) {
         -1
+    }
+
+    /**
+     * True if the user stopped the app after [sinceWallMillis]: with "Force stop" in
+     * Settings, or the Stop button in the "Active apps" panel. That panel leaves the
+     * app's alarms in place, so without this check the timer would start ringing
+     * again on its own at the next alarm.
+     */
+    fun userStoppedAppSince(context: Context, sinceWallMillis: Long): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return try {
+            val activityManager = context.getSystemService(ActivityManager::class.java) ?: return false
+            val lastExit = activityManager
+                .getHistoricalProcessExitReasons(context.packageName, 0, 1)
+                .firstOrNull() ?: return false
+            val stoppedByUser = lastExit.reason == ApplicationExitInfo.REASON_USER_REQUESTED ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM &&
+                    lastExit.reason == ApplicationExitInfo.REASON_USER_STOPPED)
+            stoppedByUser && lastExit.timestamp >= sinceWallMillis
+        } catch (e: RuntimeException) {
+            false
+        }
     }
 }
 
