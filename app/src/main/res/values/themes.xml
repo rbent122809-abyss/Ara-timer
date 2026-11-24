@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark from the very first frame, so there is no white flash on launch. -->
+    <style name="Theme.AraTimer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:colorAccent">@color/green</item>
+    </style>
+</resources>

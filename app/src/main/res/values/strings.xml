@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ara Timer</string>
+    <string name="tagline">Cleaning sprints · rings every 5 min</string>
+
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="start_description">Start the cleaning timer</string>
+    <string name="stop_description">Stop the cleaning timer</string>
+    <string name="start_failed">Couldn\'t start the timer. Please try again.</string>
+
+    <string name="status_ready">Ready</string>
+    <string name="status_running">Running</string>
+    <string name="status_ringing">Ringing</string>
+
+    <string name="until_next_ring">until next ring</string>
+    <string name="every_five_minutes">rings every 5 minutes</string>
+    <string name="ringing">Ringing</string>
+    <string name="ringing_seconds_left">%1$d s left</string>
+
+    <string name="stat_rings">Rings</string>
+    <string name="stat_elapsed">Elapsed</string>
+    <string name="stat_next">Next at</string>
+
+    <string name="sound">Sound</string>
+    <string name="sound_detail">Rings 12 s at alarm volume</string>
+    <string name="phone_ringtone">Phone ringtone</string>
+    <string name="ringtone_silent">Ringtone is silent · alarm sound used</string>
+    <string name="test">Test</string>
+    <string name="test_stop">Stop</string>
+    <string name="vibrate">Vibrate</string>
+    <string name="vibrate_subtitle">Buzz along with each ring</string>
+
+    <string name="warn_volume">Alarm volume is off, so the rings will be silent.</string>
+    <string name="warn_volume_action">Turn up</string>
+    <string name="warn_notifications">Notifications are off. The timer still works, but you won\'t see the countdown or a Stop button outside the app.</string>
+    <string name="warn_exact">Allow \"Alarms &amp; reminders\" so the rings arrive exactly on time.</string>
+    <string name="warn_battery">For on-time rings with the screen off, let Ara Timer run without battery restrictions.</string>
+    <string name="allow">Allow</string>
+    <string name="not_now">Not now</string>
+
+    <string name="channel_name">Timer</string>
+    <string name="channel_description">Shows the running cleaning timer</string>
+    <string name="notif_title_running">Cleaning timer running</string>
+    <string name="notif_text_running">Next ring at %1$s · %2$s</string>
+    <string name="notif_title_ringing">Ringing · keep going!</string>
+    <string name="notif_text_ringing">Ring %1$d · stops after 12 seconds</string>
+    <plurals name="rings_so_far">
+        <item quantity="one">%d ring so far</item>
+        <item quantity="other">%d rings so far</item>
+    </plurals>
+</resources>
